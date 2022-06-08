@@ -5,26 +5,36 @@ import numpy as np
 from scipy import stats
 import cv2
 from mesa.datacollection import DataCollector
-
+from mesa.batchrunner import batch_run
+import matplotlib.pyplot as plt
+import pickle
+import colorsys
 def compute_accuracy(model):
     food_pos_est=[]
     food_pos_real=[]
     rmse=0
+    det_info=0
+    food_count=0
     for food in model.food_list:    
-        cov=np.zeros((2,2))
+        info=np.zeros((2,2))
         pos=np.zeros(2)
         for agent in model.ant_list:
             if str(food.unique_id) in agent.pheromone["Food"].keys():
                 cov_inv=np.linalg.inv(agent.pheromone["Food"][str(food.unique_id)].covariance)
                 pos+=cov_inv@np.asarray(agent.pheromone["Food"][str(food.unique_id)].pos)
-                cov+=cov_inv
-        if np.trace(cov)!=0:
-            cov=np.linalg.inv(cov)
+                info+=cov_inv
+
+        if np.trace(info)!=0:
+            cov=np.linalg.inv(info)
             pos=cov@pos
-            food_pos_est.append(pos)
-            food_pos_real.append(np.asarray(food.pos))
-            rmse+=1/model.num_food*(np.linalg.norm(pos-np.asarray(food.pos)))**2
-    return model.num_food-len(food_pos_est),np.sqrt(rmse)
+            food_count+=1
+            
+        food_pos_est.append(pos)
+        food_pos_real.append(np.asarray(food.pos))
+        rmse+=1/model.num_food*(np.linalg.norm(pos-np.asarray(food.pos)))**2
+        det_info+=1/model.num_food*np.linalg.det(info)
+
+    return model.num_food-food_count,np.sqrt(rmse), det_info
 
 
 class Ant(Agent):
@@ -113,7 +123,7 @@ class Ant(Agent):
             else:
                 if (agent_type == "Obstacle"):
                     amplitude=self.pf_amplitude*40
-                    self.update_pheromone(neighbor=n,z=z)
+                  #  self.update_pheromone(neighbor=n,z=z)
 
                 elif (agent_type=="Food"):
                     amplitude=self.pf_amplitude
@@ -288,7 +298,7 @@ class World(Model):
         self.rmse=0
         self.missing_food=0
         self.datacollector = DataCollector(
-            model_reporters={"food_RMSE": "rmse", "missing_food": "missing_food"},
+            model_reporters={"food_RMSE": "rmse", "missing_food": "missing_food", "information": "det_info"},
         )
         self.scale=2
         self.map_img =(cv2.imread('map.png', cv2.IMREAD_GRAYSCALE)).T
@@ -361,7 +371,82 @@ class World(Model):
     def step(self):
         self.schedule.step()
         self.time+=1
-        self.missing_food, self.rmse=compute_accuracy(self)
+        self.missing_food, self.rmse, self.det_info=compute_accuracy(self)
         self.datacollector.collect(self)
 
+if __name__ == "__main__":
+    pheromone_attraction=np.arange(0,1,0.1)
+    # all_results=[]
+    # for pheromone in pheromone_attraction:
+    #     params = {"num_agents": 10,
+    #               "num_food":5,
+    #               "pheromone_attraction": pheromone}
+    
+    #     results = batch_run(
+    #         World,
+    #         parameters=params,
+    #         iterations=30, #Number of replications
+    #         max_steps=500,
+    #         number_processes=None,
+    #         data_collection_period=1,
+    #         display_progress=True)
+    #     all_results.append(results)
+    all_results=pickle.load(open( "results.p", "rb" ) )["results"]
+    for i, results in enumerate(all_results): 
+        info=[[] for x in range(30)]
+        for item in results:
+                info[int(item["iteration"])].append(item['information'])
+        info=np.asarray(info)
+        plt.plot(np.average(info, axis=0), 
+                 color=colorsys.hsv_to_rgb(i/len(all_results),1,1),
+                 label=str(pheromone_attraction[i])[0:3])
+        
+        plt.title("Cumulative Food Information")
+        plt.legend()
+        plt.xlabel("step")
+        plt.ylabel("det(information)")
 
+    plt.figure()
+    for i, results in enumerate(all_results): 
+        info=[[] for x in range(30)]
+        for item in results:
+                info[int(item["iteration"])].append(item['food_RMSE'])
+        info=np.asarray(info)
+        plt.plot(np.average(info, axis=0), 
+                 color=colorsys.hsv_to_rgb(i/len(all_results),1,1),
+                 label=str(pheromone_attraction[i])[0:3])
+        
+        plt.title("Food Location RMSE")
+        plt.legend()
+        plt.xlabel("step")
+        plt.ylabel("L2 RMSE")
+
+    plt.figure()
+    for i, results in enumerate(all_results): 
+        info=[[] for x in range(30)]
+        for item in results:
+                info[int(item["iteration"])].append(item['missing_food'])
+        info=np.asarray(info)
+        plt.plot(np.average(info, axis=0), 
+                 color=colorsys.hsv_to_rgb(i/len(all_results),1,1),
+                 label=str(pheromone_attraction[i])[0:3])
+        
+        plt.title("Missing Food")
+        plt.legend()
+        plt.xlabel("step")
+        plt.ylabel("Food Count")
+        
+    plt.figure()
+    end_step_info=[]
+    for i, results in enumerate(all_results): 
+        info=[[] for x in range(30)]
+        for item in results:
+                info[int(item["iteration"])].append(item['food_RMSE'])
+        info=np.asarray(info)
+        end_step_info.append(np.average(info, axis=0)[-1] )
+    plt.plot(pheromone_attraction,end_step_info            )
+    
+    plt.title("Missing Food")
+    plt.legend()
+    plt.xlabel("step")
+    plt.xlabel("Food Count")

@@ -72,9 +72,9 @@ def draw(agent):
                      "r": 3}
 
     return portrayal
-
+#{"Label": "food_RMSE", "Color": "#FF0000"}
 chart = ChartModule(
-    [{"Label": "food_RMSE", "Color": "#FF0000"},{"Label": "missing_food", "Color": "#0000FF"}], data_collector_name="datacollector"
+    [{"Label": "information", "Color": "#0000FF"},{"Label": "missing_food", "Color": "#00FF00"}], data_collector_name="datacollector"
 )
 canvas = SimpleCanvas(draw, 500, 500)
 
